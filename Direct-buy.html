@@ -644,9 +644,11 @@ window.debugLog = function(message, type = 'info') {
                         }).then((result) => {
                             if (result.isConfirmed && this.hasWalletInCurrentBrowser()) {
                                 this.connectInjectedWallet();
-                            } else if (result.isDenied) {
-                                this.showQrCodeOption();
-                            } else if (!this.hasWalletInCurrentBrowser() && result.isConfirmed) {
+                            } 
+							// else if (result.isDenied) {
+                              //  this.showQrCodeOption();
+                            // } 
+							else if (!this.hasWalletInCurrentBrowser() && result.isConfirmed) {
                                 this.showWalletError();
                             }
                         });
@@ -1566,6 +1568,63 @@ if (parseFloat(requestedTokenAmount) > MAX_TOKENS) {
         throw new Error('Failed to create order: ' + error.message);
     }
 }
+async function checkEthBalanceForOrder(userAddress) {
+    try {
+        const web3 = window.appState.web3;
+        
+        // Get current ETH balance
+        const ethBalanceWei = await web3.eth.getBalance(userAddress);
+        const ethBalance = web3.utils.fromWei(ethBalanceWei, 'ether');
+        
+        // Get central contract for price calculation
+        const CENTRAL_CONTRACT = '0xca1D91233233f2cC0B0dC61a7c268dF5e223D081';
+        const CENTRAL_ABI = [
+            {
+                "inputs": [],
+                "name": "usdtPerEth",
+                "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+                "stateMutability": "view",
+                "type": "function"
+            }
+        ];
+        
+        const centralContract = new web3.eth.Contract(CENTRAL_ABI, CENTRAL_CONTRACT);
+        const usdtPerEth = await centralContract.methods.usdtPerEth().call();
+        
+        // Calculate ETH needed for 1 USDC (1 USD)
+        // ethForOneUSDC = (1e6 * 1e18) / usdtPerEth
+        const ethForOneUSDC = (BigInt(1e6) * BigInt(1e18)) / BigInt(usdtPerEth);
+        const ethForOneUSDCHuman = web3.utils.fromWei(ethForOneUSDC.toString(), 'ether');
+        
+        // Estimate gas fees (createOrder uses ~200,000 gas typically)
+        const gasLimit = BigInt(250000); // Conservative estimate with buffer
+        const gasPrice = BigInt(await web3.eth.getGasPrice());
+        const gasCost = gasLimit * gasPrice;
+        const gasCostHuman = web3.utils.fromWei(gasCost.toString(), 'ether');
+        
+        // Total required = Order fee (1 USD in ETH) + Network fees
+        const totalRequired = BigInt(ethForOneUSDC) + gasCost;
+        const totalRequiredHuman = web3.utils.fromWei(totalRequired.toString(), 'ether');
+        
+        // Check if user has enough
+        const hasEnough = BigInt(ethBalanceWei) >= totalRequired;
+        const missingAmount = hasEnough ? BigInt(0) : totalRequired - BigInt(ethBalanceWei);
+        const missingAmountHuman = web3.utils.fromWei(missingAmount.toString(), 'ether');
+        
+        return {
+            hasEnough,
+            currentBalance: parseFloat(ethBalance).toFixed(6),
+            requiredAmount: parseFloat(totalRequiredHuman).toFixed(6),
+            orderFee: parseFloat(ethForOneUSDCHuman).toFixed(6),
+            gasCost: parseFloat(gasCostHuman).toFixed(6),
+            missingAmount: parseFloat(missingAmountHuman).toFixed(6)
+        };
+        
+    } catch (error) {
+        console.error('Error checking ETH balance:', error);
+        throw new Error('Failed to check ETH balance: ' + error.message);
+    }
+}
 function setupEnhancedBuyWidget() {
     // Enhanced buy function with createOrder support
     window.openBuyWidget = async function(tokenAmount = '100') {
@@ -1625,41 +1684,79 @@ function setupEnhancedBuyWidget() {
         
         // STEP 2: No pending order - execute createOrder first
         Swal.fire({
-            title: 'Create New Order',
-            html: `
-                <div style="text-align: left;">
-                    <p>You need to create an order first before purchasing.</p>
-					<p>There is a fee for place the order of exact 1 USD in Ether price.</p>
-                    <div style="background: #f0f8ff; padding: 15px; border-radius: 8px; margin: 15px 0;">
-                        <strong>Order Details:</strong><br>
-                        • Token Amount: ${tokenAmount}<br>
-                        • This will reserve your tokens for 15 minutes
-                    </div>
-                </div>
-            `,
-            icon: 'info',
-            showCancelButton: true,
-            confirmButtonText: 'Create Order',
-            cancelButtonText: 'Cancel'
-        }).then(async (result) => {
-            if (result.isConfirmed) {
-                try {
-                    // Execute createOrder function
-                    const createOrderResult = await executeCreateOrder(userAddress, tokenAmount);
-                    
-                    if (createOrderResult.success) {
-                        // Order created successfully, proceed with purchase
-                        await proceedWithPurchase(userAddress, tokenAmount, false);
-                    }
-                } catch (error) {
-                    Swal.fire({
-                        title: 'Order Creation Failed',
-                        text: error.message,
-                        icon: 'error'
-                    });
-                }
+    title: 'Create New Order',
+    html: `
+        <div style="text-align: left;">
+            <p>You need to create an order first before purchasing.</p>
+            <p>There is a fee for place the order of exact 1 USD in Ether price.</p>
+            <div style="background: #f0f8ff; padding: 15px; border-radius: 8px; margin: 15px 0;">
+                <strong>Order Details:</strong><br>
+                • Token Amount: ${tokenAmount}<br>
+                • This will reserve your tokens for 15 minutes
+            </div>
+        </div>
+    `,
+    icon: 'info',
+    showCancelButton: true,
+    confirmButtonText: 'Create Order',
+    cancelButtonText: 'Cancel'
+}).then(async (result) => {
+    if (result.isConfirmed) {
+        try {
+            // NEW: Check ETH balance before proceeding
+            const ethCheck = await checkEthBalanceForOrder(userAddress);
+            
+            if (!ethCheck.hasEnough) {
+                Swal.fire({
+                    title: 'Insufficient Ether Balance',
+                    html: `
+                        <div style="text-align: left;">
+                            <p style="color: #721c24; font-weight: bold; margin-bottom: 15px;">
+                                You do not have enough ether for place the order.
+                            </p>
+                            <div style="background: #f8d7da; padding: 15px; border-radius: 8px; margin: 15px 0; border: 1px solid #f5c6cb; color: #721c24;">
+                                <div style="margin-bottom: 10px;">
+                                    <strong>You have:</strong> ${ethCheck.currentBalance} ETH
+                                </div>
+                                <div style="margin-bottom: 10px;">
+                                    <strong>You need around:</strong> ${ethCheck.requiredAmount} ETH
+                                </div>
+                                <div style="margin-bottom: 10px; font-size: 0.9em; padding-left: 10px; border-left: 3px solid #dc3545;">
+                                    • Order fee (1 USD): ~${ethCheck.orderFee} ETH<br>
+                                    • Network fees: ~${ethCheck.gasCost} ETH
+                                </div>
+                                <div style="margin-top: 15px; padding-top: 10px; border-top: 2px solid #f5c6cb; font-weight: bold; font-size: 1.1em;">
+                                    Missing more ${ethCheck.missingAmount} ETH to proceed for place order
+                                </div>
+                            </div>
+                            <p style="margin-top: 15px; color: #856404; background: #fff3cd; padding: 10px; border-radius: 5px; border: 1px solid #ffeaa7;">
+                                💡 Please add more ETH to your wallet and try again.
+                            </p>
+                        </div>
+                    `,
+                    icon: 'error',
+                    confirmButtonText: 'OK',
+                    confirmButtonColor: '#dc3545'
+                });
+                return;
             }
-        });
+            
+            // If enough balance, proceed with order creation
+            const createOrderResult = await executeCreateOrder(userAddress, tokenAmount);
+            
+            if (createOrderResult.success) {
+                // Order created successfully, proceed with purchase
+                await proceedWithPurchase(userAddress, tokenAmount, false);
+            }
+        } catch (error) {
+            Swal.fire({
+                title: 'Order Creation Failed',
+                text: error.message,
+                icon: 'error'
+            });
+        }
+    }
+});
     };
     
     addEnhancedBuyButtonToUI();

@@ -644,9 +644,11 @@ window.debugLog = function(message, type = 'info') {
                         }).then((result) => {
                             if (result.isConfirmed && this.hasWalletInCurrentBrowser()) {
                                 this.connectInjectedWallet();
-                            } else if (result.isDenied) {
-                                this.showQrCodeOption();
-                            } else if (!this.hasWalletInCurrentBrowser() && result.isConfirmed) {
+                            } 
+							// else if (result.isDenied) {
+                              //  this.showQrCodeOption();
+                            // } 
+							else if (!this.hasWalletInCurrentBrowser() && result.isConfirmed) {
                                 this.showWalletError();
                             }
                         });
