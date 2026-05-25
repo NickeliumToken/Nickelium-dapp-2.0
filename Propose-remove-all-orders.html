@@ -748,11 +748,12 @@ window.debugLog = function(message, type = 'info') {
 }
 
   static async showTokenAddPrompt() {
-    if (localStorage.getItem('nclTokenAdded') === 'true') {
-        return;
-    }
+   // if (localStorage.getItem('nclTokenAdded') === 'true') {
+    //    return;
+   // } 
+	return; 
     
-    const isMetaMaskMobile = /MetaMask/i.test(navigator.userAgent) && this.state.isMobile;
+    /*const isMetaMaskMobile = /MetaMask/i.test(navigator.userAgent) && this.state.isMobile;
     
         if (isMetaMaskMobile || this.state.isMobile) {
         window.debugLog('Mobile flow detected. isMetaMaskMobile: ' + isMetaMaskMobile, 'info');
@@ -841,7 +842,7 @@ window.debugLog = function(message, type = 'info') {
             // Resolve after entire flow
             resolve();
         });
-    }
+    } */
 }
     }
     // Wait for DOM to be fully loaded before starting anything
